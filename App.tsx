@@ -13,9 +13,9 @@ import SupportPage from './components/SupportPage';
 import HelpCenterPage from './components/HelpCenterPage';
 import PrivacyPolicyPage from './components/PrivacyPolicyPage';
 import AdminLayout from './components/admin/AdminLayout';
+import ErrorBoundary from './components/ErrorBoundary';
 import { supabase } from './lib/supabaseClient';
 import type { Session } from '@supabase/supabase-js';
-
 
 type Role = 'student' | 'admin';
 type AuthScreen = 'roleSelection' | 'login' | 'dashboard';
@@ -23,7 +23,7 @@ type PublicPage = 'home' | 'features' | 'courses' | 'contact' | 'start' | 'suppo
 type Page = PublicPage | 'auth';
 type Theme = 'light' | 'dark';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [page, setPage] = useState<Page>('home');
   const [authScreen, setAuthScreen] = useState<AuthScreen>('roleSelection');
   const [role, setRole] = useState<Role | null>(null);
@@ -33,7 +33,6 @@ const App: React.FC = () => {
   });
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-
 
   useEffect(() => {
     setLoading(true);
@@ -239,6 +238,14 @@ const App: React.FC = () => {
         </main>
         <Footer onNavigate={handleNavigate} />
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
   );
 };
 

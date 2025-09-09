@@ -12,6 +12,10 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      server: {
+        // @ts-ignore
+        allowedHosts: process.env.TEMPO === "true" ? true : undefined
       }
     };
 });
