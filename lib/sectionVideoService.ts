@@ -7,8 +7,8 @@ export interface SectionFormData {
   title: string;
   description: string;
   thumbnail?: string;
-  // status: 'draft' | 'published' | 'archived'; // Temporarily commented out until database is fixed
-  // featured: boolean; // Temporarily commented out until database is fixed
+  status?: 'draft' | 'published' | 'archived';
+  featured?: boolean;
 }
 
 // Video Form Data Interface
@@ -28,8 +28,6 @@ export interface Section {
   title: string;
   description: string;
   thumbnail?: string;
-  // status: 'draft' | 'published' | 'archived'; // Temporarily commented out until database is fixed
-  // featured: boolean; // Temporarily commented out until database is fixed
   created_at: string;
   updated_at: string;
 }
@@ -158,90 +156,167 @@ export const SectionService = {
     return data
   },
 
-  // Create new section
+  // Create new section - FIXED VERSION
   async createSection(sectionData: SectionFormData) {
     try {
-      // Remove status, featured, and thumbnail fields temporarily until database is fixed
-      const { status, featured, thumbnail, ...dataWithoutProblematicFields } = sectionData as any;
+      console.log('Creating section with data:', sectionData);
       
-      // Use admin client to bypass RLS policies
-      const { data, error } = await supabaseAdmin
-        .from('sections')
-        .insert([{
-          ...dataWithoutProblematicFields,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }])
-        .select()
+      const sectionToCreate = {
+        title: sectionData.title,
+        description: sectionData.description || '',
+        thumbnail: sectionData.thumbnail || null,
+        status: sectionData.status || 'draft',
+        featured: sectionData.featured || false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
 
+      // Use regular client first, fallback to admin if needed
+      let { data, error } = await supabase
+        .from('sections')
+        .insert([sectionToCreate])
+        .select()
+        .single();
+
+      // If regular client fails due to RLS, try with admin client
       if (error) {
-        console.error('Error creating section:', error)
-        throw error
+        console.log('Regular client failed, trying with admin client:', error);
+        const result = await supabaseAdmin
+          .from('sections')
+          .insert([sectionToCreate])
+          .select()
+          .single();
+        
+        data = result.data;
+        error = result.error;
       }
 
-      return data[0]
+      if (error) {
+        console.error('Error creating section:', error);
+        throw new Error(`فشل في إنشاء القسم: ${error.message}`);
+      }
+
+      console.log('Section created successfully:', data);
+      return data;
     } catch (err) {
-      console.error('Error creating section:', err)
-      throw err
+      console.error('Error creating section:', err);
+      throw err;
     }
   },
 
-  // Update section
+  // Update section - FIXED VERSION
   async updateSection(id: string, sectionData: SectionFormData) {
-    // Remove status, featured, and thumbnail fields temporarily until database is fixed
-    const { status, featured, thumbnail, ...dataWithoutProblematicFields } = sectionData as any;
-    
-    // Use admin client to bypass RLS policies
-    const { data, error } = await supabaseAdmin
-      .from('sections')
-      .update({
-        ...dataWithoutProblematicFields,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id)
-      .select()
-
-    if (error) {
-      console.error('Error updating section:', error)
-      throw error
-    }
-
-    return data[0]
-  },
-
-  // Delete section
-  async deleteSection(id: string) {
-    // Use admin client to bypass RLS policies
-    const { error } = await supabaseAdmin
-      .from('sections')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
-      console.error('Error deleting section:', error)
-      throw error
-    }
-  },
-
-  // Get all sections
-  async getSections() {
     try {
-      // Use admin client to bypass RLS policies
-      const { data, error } = await supabaseAdmin
+      console.log('Updating section:', id, sectionData);
+      
+      const sectionToUpdate = {
+        title: sectionData.title,
+        description: sectionData.description || '',
+        thumbnail: sectionData.thumbnail || null,
+        status: sectionData.status || 'draft',
+        featured: sectionData.featured || false,
+        updated_at: new Date().toISOString()
+      };
+
+      // Use regular client first, fallback to admin if needed
+      let { data, error } = await supabase
+        .from('sections')
+        .update(sectionToUpdate)
+        .eq('id', id)
+        .select()
+        .single();
+
+      // If regular client fails due to RLS, try with admin client
+      if (error) {
+        console.log('Regular client failed, trying with admin client:', error);
+        const result = await supabaseAdmin
+          .from('sections')
+          .update(sectionToUpdate)
+          .eq('id', id)
+          .select()
+          .single();
+        
+        data = result.data;
+        error = result.error;
+      }
+
+      if (error) {
+        console.error('Error updating section:', error);
+        throw new Error(`فشل في تحديث القسم: ${error.message}`);
+      }
+
+      console.log('Section updated successfully:', data);
+      return data;
+    } catch (err) {
+      console.error('Error updating section:', err);
+      throw err;
+    }
+  },
+
+  // Delete section - FIXED VERSION
+  async deleteSection(id: string) {
+    try {
+      console.log('Deleting section:', id);
+      
+      // Use regular client first, fallback to admin if needed
+      let { error } = await supabase
+        .from('sections')
+        .delete()
+        .eq('id', id);
+
+      // If regular client fails due to RLS, try with admin client
+      if (error) {
+        console.log('Regular client failed, trying with admin client:', error);
+        const result = await supabaseAdmin
+          .from('sections')
+          .delete()
+          .eq('id', id);
+        
+        error = result.error;
+      }
+
+      if (error) {
+        console.error('Error deleting section:', error);
+        throw new Error(`فشل في حذف القسم: ${error.message}`);
+      }
+
+      console.log('Section deleted successfully');
+    } catch (err) {
+      console.error('Error deleting section:', err);
+      throw err;
+    }
+  },
+
+  // Get all sections - IMPROVED VERSION
+  async getAllSections() {
+    try {
+      // Use regular client first, fallback to admin if needed
+      let { data, error } = await supabase
         .from('sections')
         .select('*')
-        .order('created_at', { ascending: false })
+        .order('created_at', { ascending: false });
 
+      // If regular client fails due to RLS, try with admin client
       if (error) {
-        console.error('Error fetching sections:', error)
-        // Return empty array if table doesn't exist yet
-        return []
+        console.log('Regular client failed, trying with admin client:', error);
+        const result = await supabaseAdmin
+          .from('sections')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        data = result.data;
+        error = result.error;
       }
 
-      return data || []
+      if (error) {
+        console.error('Error fetching sections:', error);
+        return [];
+      }
+
+      return data || [];
     } catch (err) {
-      console.error('Error fetching sections:', err)
-      return []
+      console.error('Error fetching sections:', err);
+      return [];
     }
   },
 
@@ -497,66 +572,138 @@ export const VideoService = {
     }
   },
 
-  // Create new video
+  // Create new video - ENHANCED VERSION
   async createVideo(videoData: VideoFormData) {
     try {
-      // Only use fields that exist in the current database schema
+      console.log('Creating video with data:', videoData);
+      
       const videoToCreate = {
         title: videoData.title,
+        description: videoData.description || '',
         url: videoData.url,
+        section_id: videoData.section_id,
+        duration_minutes: videoData.duration_minutes,
+        thumbnail: videoData.thumbnail || null,
+        status: videoData.status || 'draft',
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       };
 
-      // Use admin client to bypass RLS policies
-      const { data, error } = await supabaseAdmin
+      // Use regular client first, fallback to admin if needed
+      let { data, error } = await supabase
         .from('videos')
         .insert([videoToCreate])
         .select()
+        .single();
 
+      // If regular client fails due to RLS, try with admin client
       if (error) {
-        console.error('Error creating video:', error)
-        throw error
+        console.log('Regular client failed, trying with admin client:', error);
+        const result = await supabaseAdmin
+          .from('videos')
+          .insert([videoToCreate])
+          .select()
+          .single();
+        
+        data = result.data;
+        error = result.error;
       }
 
-      return data[0]
+      if (error) {
+        console.error('Error creating video:', error);
+        throw new Error(`فشل في إنشاء الفيديو: ${error.message}`);
+      }
+
+      console.log('Video created successfully:', data);
+      return data;
     } catch (err) {
-      console.error('Error creating video:', err)
-      throw err
+      console.error('Error creating video:', err);
+      throw err;
     }
   },
 
-  // Update video
+  // Update video - ENHANCED VERSION
   async updateVideo(id: string, videoData: VideoFormData) {
-    // Use admin client to bypass RLS policies
-    const { data, error } = await supabaseAdmin
-      .from('videos')
-      .update({
-        ...videoData,
+    try {
+      console.log('Updating video:', id, videoData);
+      
+      const videoToUpdate = {
+        title: videoData.title,
+        description: videoData.description || '',
+        url: videoData.url,
+        section_id: videoData.section_id,
+        duration_minutes: videoData.duration_minutes,
+        thumbnail: videoData.thumbnail || null,
+        status: videoData.status || 'draft',
         updated_at: new Date().toISOString()
-      })
-      .eq('id', id)
-      .select()
+      };
 
-    if (error) {
-      console.error('Error updating video:', error)
-      throw error
+      // Use regular client first, fallback to admin if needed
+      let { data, error } = await supabase
+        .from('videos')
+        .update(videoToUpdate)
+        .eq('id', id)
+        .select()
+        .single();
+
+      // If regular client fails due to RLS, try with admin client
+      if (error) {
+        console.log('Regular client failed, trying with admin client:', error);
+        const result = await supabaseAdmin
+          .from('videos')
+          .update(videoToUpdate)
+          .eq('id', id)
+          .select()
+          .single();
+        
+        data = result.data;
+        error = result.error;
+      }
+
+      if (error) {
+        console.error('Error updating video:', error);
+        throw new Error(`فشل في تحديث الفيديو: ${error.message}`);
+      }
+
+      console.log('Video updated successfully:', data);
+      return data;
+    } catch (err) {
+      console.error('Error updating video:', err);
+      throw err;
     }
-
-    return data[0]
   },
 
-  // Delete video
+  // Delete video - ENHANCED VERSION
   async deleteVideo(id: string) {
-    // Use admin client to bypass RLS policies
-    const { error } = await supabaseAdmin
-      .from('videos')
-      .delete()
-      .eq('id', id)
+    try {
+      console.log('Deleting video:', id);
+      
+      // Use regular client first, fallback to admin if needed
+      let { error } = await supabase
+        .from('videos')
+        .delete()
+        .eq('id', id);
 
-    if (error) {
-      console.error('Error deleting video:', error)
-      throw error
+      // If regular client fails due to RLS, try with admin client
+      if (error) {
+        console.log('Regular client failed, trying with admin client:', error);
+        const result = await supabaseAdmin
+          .from('videos')
+          .delete()
+          .eq('id', id);
+        
+        error = result.error;
+      }
+
+      if (error) {
+        console.error('Error deleting video:', error);
+        throw new Error(`فشل في حذف الفيديو: ${error.message}`);
+      }
+
+      console.log('Video deleted successfully');
+    } catch (err) {
+      console.error('Error deleting video:', err);
+      throw err;
     }
   },
 

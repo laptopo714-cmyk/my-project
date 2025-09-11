@@ -4,6 +4,7 @@ import { StudentService, ActivityLogsService } from '../../../lib/supabaseServic
 import { ToastContainer, useToast } from '../../ToastNotification';
 import type { Student } from '../../../types';
 import type { AdminRole } from '../../../lib/adminPermissions';
+import { supabaseAdmin } from '../../../lib/supabaseClient';
 
 interface ExtendedStudent extends Student {
   full_name?: string;
@@ -31,6 +32,14 @@ interface StudentFormData {
   password: string;
   account_expires_at: string;
   status: 'active' | 'suspended' | 'pending' | 'inactive';
+  selectedSections: string[]; // إضافة الأقسام المختارة
+}
+
+interface Section {
+  id: string;
+  title: string;
+  description?: string;
+  status: string;
 }
 
 // Enhanced Student Modal with comprehensive form
@@ -48,12 +57,84 @@ const StudentModal: React.FC<{
         email: student.email || '',
         password: '',
         account_expires_at: student.account_expires_at || '',
-        status: student.status || 'active'
+        status: student.status || 'active',
+        selectedSections: [] // إضافة الأقسام المختارة
     });
     
     const [loading, setSaving] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+    const [sections, setSections] = useState<Section[]>([]);
+    const [loadingSections, setLoadingSections] = useState(true);
+    const [studentSections, setStudentSections] = useState<string[]>([]);
     const isNew = !student.id;
+
+    // تحميل الأقسام المتاحة
+    useEffect(() => {
+        fetchSections();
+        if (!isNew && student.id) {
+            fetchStudentSections(student.id);
+        }
+    }, [isNew, student.id]);
+
+    const fetchSections = async () => {
+        try {
+            setLoadingSections(true);
+            const { data, error } = await supabaseAdmin
+                .from('sections')
+                .select('id, title, description, status')
+                .eq('status', 'published')
+                .order('title');
+
+            if (error) throw error;
+            setSections(data || []);
+        } catch (error) {
+            console.error('Error fetching sections:', error);
+        } finally {
+            setLoadingSections(false);
+        }
+    };
+
+    const fetchStudentSections = async (studentId: string) => {
+        try {
+            setLoadingSections(true);
+            
+            // الحصول على auth_user_id للطالب أولاً
+            const { data: studentData, error: studentError } = await supabaseAdmin
+                .from('students')
+                .select('auth_user_id')
+                .eq('id', studentId)
+                .single();
+
+            if (studentError || !studentData?.auth_user_id) {
+                console.error('Error fetching student auth_user_id:', studentError);
+                setStudentSections([]);
+                return;
+            }
+
+            const { data, error } = await supabaseAdmin
+                .from('student_section_access')
+                .select(`
+                    section_id,
+                    sections (
+                        title
+                    )
+                `)
+                .eq('student_id', studentData.auth_user_id); // استخدام auth_user_id
+
+            if (error) throw error;
+            
+            const sectionTitles = (data || [])
+                .map(item => item.sections?.title)
+                .filter(Boolean);
+            
+            setStudentSections(sectionTitles);
+        } catch (error) {
+            console.error('Error fetching student sections:', error);
+            setStudentSections([]);
+        } finally {
+            setLoadingSections(false);
+        }
+    };
 
     // Generate email automatically based on name
     const generateEmail = (name: string) => {
@@ -80,7 +161,7 @@ const StudentModal: React.FC<{
             .replace(/[^a-z\s]/g, '') // Remove non-English characters
             .replace(/\s+/g, '.') // Replace spaces with dots
             .replace(/\.+/g, '.') // Remove multiple dots
-            .replace(/^\.|\.$/, ''); // Remove leading/trailing dots
+            .replace(/^\.|\.$/g, ''); // Remove leading/trailing dots
         
         return `${englishName}@kareem.com`;
     };
@@ -127,6 +208,15 @@ const StudentModal: React.FC<{
         }
     };
 
+    const handleSectionChange = (sectionId: string, checked: boolean) => {
+        setFormData(prev => ({
+            ...prev,
+            selectedSections: checked 
+                ? [...prev.selectedSections, sectionId]
+                : prev.selectedSections.filter(id => id !== sectionId)
+        }));
+    };
+
     const handleGeneratePassword = () => {
         const newPassword = generatePassword();
         setFormData(prev => ({
@@ -145,12 +235,17 @@ const StudentModal: React.FC<{
         }
         
         if (!formData.email.trim()) {
-            alert('يرجى إدخال البريد الإلكتروني');
+            alert('يرجى إد��ال البريد الإل��تروني');
             return;
         }
         
         if (isNew && !formData.password.trim()) {
             alert('يرجى إدخال أو توليد كلمة مرور');
+            return;
+        }
+
+        if (isNew && formData.selectedSections.length === 0) {
+            alert('يرجى اختيار قسم واحد على الأقل للطالب');
             return;
         }
         
@@ -166,7 +261,7 @@ const StudentModal: React.FC<{
 
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-2xl animate-fade-in-up max-h-[95vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-4xl animate-fade-in-up max-h-[95vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <form onSubmit={handleSubmit}>
                     <div className="p-6 border-b border-gray-200 dark:border-gray-700">
                         <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{isNew ? 'إضافة طالب جديد' : 'تعديل بيانات الطالب'}</h3>
@@ -274,6 +369,58 @@ const StudentModal: React.FC<{
                             </div>
                         )}
 
+                        {/* اختيار الأقسام المتاحة */}
+                        <div>
+                            <label className="block mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300">
+                                الأقسام المتاحة للطالب {isNew && '*'}
+                            </label>
+                            {loadingSections ? (
+                                <div className="flex items-center justify-center p-8 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-violet-500"></div>
+                                    <span className="mr-2 text-gray-600 dark:text-gray-300">جاري تحميل الأقسام...</span>
+                                </div>
+                            ) : sections.length === 0 ? (
+                                <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                                    <p className="text-yellow-800 dark:text-yellow-200 text-sm">
+                                        لا توجد أقسام متاحة حالياً. يرجى إضافة أقسام أولاً من إدارة المحتوى.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                                    {sections.map((section) => (
+                                        <label key={section.id} className="flex items-start gap-3 p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer transition-colors">
+                                            <input
+                                                type="checkbox"
+                                                checked={formData.selectedSections.includes(section.id)}
+                                                onChange={(e) => handleSectionChange(section.id, e.target.checked)}
+                                                className="mt-1 h-4 w-4 text-violet-600 focus:ring-violet-500 border-gray-300 rounded"
+                                            />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                                    {section.title}
+                                                </div>
+                                                {section.description && (
+                                                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">
+                                                        {section.description}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </label>
+                                    ))}
+                                </div>
+                            )}
+                            {isNew && (
+                                <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                                    💡 يجب اختيار قسم واحد على الأقل. يمكن تعديل الأقسام لاحقاً من خلال تعديل بيانات الطالب.
+                                </div>
+                            )}
+                            {!isNew && formData.selectedSections.length > 0 && (
+                                <div className="mt-2 text-xs text-green-600 dark:text-green-400">
+                                    ✓ تم اختيار {formData.selectedSections.length} قسم/أقسام
+                                </div>
+                            )}
+                        </div>
+
                         {/* تاريخ انتهاء الحساب */}
                         <div>
                             <label className="block mb-2 text-sm font-semibold text-gray-700 dark:text-gray-300">تاريخ انتهاء صلاحية الحساب</label>
@@ -341,6 +488,136 @@ const StudentModal: React.FC<{
     );
 };
 
+// مكون لعرض صف الطالب مع الأقسام المخصصة له
+const StudentRow: React.FC<{
+    student: Student;
+    onEdit: () => void;
+    onDelete: () => void;
+}> = ({ student, onEdit, onDelete }) => {
+    const [studentSections, setStudentSections] = useState<string[]>([]);
+    const [sectionsLoading, setSectionsLoading] = useState(true);
+
+    useEffect(() => {
+        fetchStudentSections();
+    }, [student.id]);
+
+    const fetchStudentSections = async () => {
+        try {
+            setSectionsLoading(true);
+            
+            // الحصول على auth_user_id للطالب أولاً
+            const { data: studentData, error: studentError } = await supabaseAdmin
+                .from('students')
+                .select('auth_user_id')
+                .eq('id', student.id)
+                .single();
+
+            if (studentError || !studentData?.auth_user_id) {
+                console.error('Error fetching student auth_user_id:', studentError);
+                setStudentSections([]);
+                return;
+            }
+
+            const { data, error } = await supabaseAdmin
+                .from('student_section_access')
+                .select('section_id')
+                .eq('student_id', studentData.auth_user_id); // استخدام auth_user_id
+
+            if (error) throw error;
+            const sectionIds = (data || []).map(item => item.section_id);
+            setStudentSections(sectionIds);
+        } catch (error) {
+            console.error('Error fetching student sections:', error);
+            setStudentSections([]);
+        } finally {
+            setSectionsLoading(false);
+        }
+    };
+
+    return (
+        <tr className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+            <td className="p-4 font-semibold text-gray-800 dark:text-gray-100">
+                <div>
+                    <div>{student.name}</div>
+                    {student.parent_phone && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400">ولي الأمر: {student.parent_phone}</div>
+                    )}
+                </div>
+            </td>
+            <td className="p-4 text-gray-600 dark:text-gray-300">{student.email}</td>
+            <td className="p-4 text-gray-600 dark:text-gray-300">{student.phone || '-'}</td>
+            <td className="p-4">
+                {sectionsLoading ? (
+                    <div className="flex items-center gap-2">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-violet-500"></div>
+                        <span className="text-xs text-gray-500">جاري التحميل...</span>
+                    </div>
+                ) : studentSections.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                        {studentSections.slice(0, 2).map((sectionTitle, index) => (
+                            <span
+                                key={index}
+                                className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-violet-100 text-violet-800 dark:bg-violet-900/50 dark:text-violet-300"
+                            >
+                                {sectionTitle}
+                            </span>
+                        ))}
+                        {studentSections.length > 2 && (
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                                +{studentSections.length - 2}
+                            </span>
+                        )}
+                    </div>
+                ) : (
+                    <span className="text-xs text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded-full">
+                        لا توجد أقسام
+                    </span>
+                )}
+            </td>
+            <td className="p-4 text-gray-600 dark:text-gray-300">{new Date(student.created_at).toLocaleDateString('ar-EG')}</td>
+            <td className="p-4">
+                <span className={`px-3 py-1 text-xs font-bold rounded-full ${
+                    student.status === 'active' ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' :
+                    student.status === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300' :
+                    student.status === 'inactive' ? 'bg-gray-100 text-gray-700 dark:bg-gray-900/50 dark:text-gray-300' :
+                    'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300'
+                }`}>
+                    {
+                        student.status === 'active' ? 'نشط' :
+                        student.status === 'pending' ? 'معلق' :
+                        student.status === 'inactive' ? 'غير نشط' :
+                        'محظور'
+                    }
+                </span>
+                {student.account_expires_at && (
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        ينتهي: {new Date(student.account_expires_at).toLocaleDateString('ar-EG')}
+                    </div>
+                )}
+            </td>
+            <td className="p-4">
+                <div className="flex gap-2">
+                    <button 
+                        onClick={onEdit} 
+                        className="text-gray-400 hover:text-blue-500 transition-colors p-2 rounded-lg hover:bg-blue-50" 
+                        aria-label="تعديل"
+                        title="تعديل بيانات الطالب"
+                    >
+                        <PencilIcon className="w-5 h-5"/>
+                    </button>
+                    <button 
+                        onClick={onDelete} 
+                        className="text-gray-400 hover:text-red-500 transition-colors p-2 rounded-lg hover:bg-red-50" 
+                        aria-label="حذف"
+                        title="حذف الطالب"
+                    >
+                        <TrashIcon className="w-5 h-5"/>
+                    </button>
+                </div>
+            </td>
+        </tr>
+    );
+};
 
 const ManageStudentsPage: React.FC<{adminRole: AdminRole}> = ({ adminRole }) => {
     const [students, setStudents] = useState<Student[]>([]);
@@ -419,6 +696,11 @@ const ManageStudentsPage: React.FC<{adminRole: AdminRole}> = ({ adminRole }) => 
                     account_expires_at: studentData.account_expires_at || undefined
                 });
                 
+                // تحديث أقسام الطالب
+                if (studentData.selectedSections.length > 0) {
+                    await updateStudentSections(editingStudent.id, studentData.selectedSections);
+                }
+                
                 // إظهار رسالة نجاح
                 showSuccess('تم التحديث بنجاح', `تم تحديث بيانات الطالب ${studentData.name} بنجاح`);
                 
@@ -439,6 +721,12 @@ const ManageStudentsPage: React.FC<{adminRole: AdminRole}> = ({ adminRole }) => 
                     account_expires_at: studentData.account_expires_at || undefined,
                     status: studentData.status
                 });
+
+                // إضافة الطالب إلى الأقسام المختارة
+                if (studentData.selectedSections.length > 0) {
+                    await assignStudentToSections(newStudent.id, studentData.selectedSections);
+                }
+
                 showSuccess('تم إنشاء الطالب بنجاح', `تم إنشاء حساب الطالب ${studentData.name} بنجاح. يمكنه الآن تسجيل الدخول باستخدام بريده وكلمة المرور.`);
                 
                 // إضافة الطالب الجديد مباشرة إلى الـ state
@@ -451,6 +739,115 @@ const ManageStudentsPage: React.FC<{adminRole: AdminRole}> = ({ adminRole }) => 
             console.error('Error saving student:', error);
             const errorMessage = error instanceof Error ? error.message : 'حدث خطأ غير متوقع';
             showError('فشل في حفظ بيانات الطالب', errorMessage);
+        }
+    };
+
+    // دالة لإضافة الطالب إلى الأقسام المختارة
+    const assignStudentToSections = async (studentId: string, sectionIds: string[]) => {
+        try {
+            // الحصول على auth_user_id للطالب
+            const { data: studentData, error: studentError } = await supabaseAdmin
+                .from('students')
+                .select('auth_user_id')
+                .eq('id', studentId)
+                .single();
+
+            if (studentError || !studentData?.auth_user_id) {
+                throw new Error('فشل في الحصول على معرف المصادقة للطالب');
+            }
+
+            const assignments = sectionIds.map(sectionId => ({
+                student_id: studentData.auth_user_id, // استخدام auth_user_id بدلاً من student id
+                section_id: sectionId,
+                granted_at: new Date().toISOString()
+            }));
+
+            const { error } = await supabaseAdmin
+                .from('student_section_access')
+                .insert(assignments);
+
+            if (error) throw error;
+
+            // تسجيل النشاط
+            await ActivityLogsService.logActivity({
+                user_id: 'admin',
+                user_name: 'مدير النظام',
+                user_role: 'admin',
+                action: 'student_sections_assigned',
+                action_type: 'create',
+                resource_type: 'student_access',
+                resource_id: studentId,
+                details: {
+                    assigned_sections: sectionIds.length,
+                    section_ids: sectionIds,
+                    auth_user_id: studentData.auth_user_id
+                },
+                severity: 'low',
+                status: 'success'
+            });
+        } catch (error) {
+            console.error('Error assigning student to sections:', error);
+            throw new Error('فشل في تعيين الأقسام للطالب');
+        }
+    };
+
+    // دالة لتحديث أقسام الطالب
+    const updateStudentSections = async (studentId: string, sectionIds: string[]) => {
+        try {
+            // الحصول على auth_user_id للطالب
+            const { data: studentData, error: studentError } = await supabaseAdmin
+                .from('students')
+                .select('auth_user_id')
+                .eq('id', studentId)
+                .single();
+
+            if (studentError || !studentData?.auth_user_id) {
+                throw new Error('فشل في الحصول على معرف المصادقة للطالب');
+            }
+
+            // حذف التعيينات الحالية
+            const { error: deleteError } = await supabaseAdmin
+                .from('student_section_access')
+                .delete()
+                .eq('student_id', studentData.auth_user_id); // استخدام auth_user_id
+
+            if (deleteError) throw deleteError;
+
+            // إضافة التعيينات الجديدة
+            if (sectionIds.length > 0) {
+                const assignments = sectionIds.map(sectionId => ({
+                    student_id: studentData.auth_user_id, // استخدام auth_user_id
+                    section_id: sectionId,
+                    granted_at: new Date().toISOString()
+                }));
+
+                const { error: insertError } = await supabaseAdmin
+                    .from('student_section_access')
+                    .insert(assignments);
+
+                if (insertError) throw insertError;
+            }
+
+            // تسجيل النشاط
+            await ActivityLogsService.logActivity({
+                user_id: 'admin',
+                user_name: 'مدير النظام',
+                user_role: 'admin',
+                action: 'student_sections_updated',
+                action_type: 'update',
+                resource_type: 'student_access',
+                resource_id: studentId,
+                details: {
+                    updated_sections: sectionIds.length,
+                    section_ids: sectionIds,
+                    auth_user_id: studentData.auth_user_id
+                },
+                severity: 'low',
+                status: 'success'
+            });
+        } catch (error) {
+            console.error('Error updating student sections:', error);
+            throw new Error('فشل في تحديث أقسام الطالب');
         }
     };
 
@@ -521,6 +918,7 @@ const ManageStudentsPage: React.FC<{adminRole: AdminRole}> = ({ adminRole }) => 
                                         <th className="p-4 text-sm font-semibold text-gray-500 dark:text-gray-400">الاسم</th>
                                         <th className="p-4 text-sm font-semibold text-gray-500 dark:text-gray-400">البريد الإلكتروني</th>
                                         <th className="p-4 text-sm font-semibold text-gray-500 dark:text-gray-400">رقم الهاتف</th>
+                                        <th className="p-4 text-sm font-semibold text-gray-500 dark:text-gray-400">الأقسام المتاحة</th>
                                         <th className="p-4 text-sm font-semibold text-gray-500 dark:text-gray-400">تاريخ التسجيل</th>
                                         <th className="p-4 text-sm font-semibold text-gray-500 dark:text-gray-400">الحالة</th>
                                         <th className="p-4 text-sm font-semibold text-gray-500 dark:text-gray-400">إجراءات</th>
@@ -529,63 +927,11 @@ const ManageStudentsPage: React.FC<{adminRole: AdminRole}> = ({ adminRole }) => 
                                 <tbody>
                                     {students.length > 0 ? (
                                         students.map(student => (
-                                            <tr key={student.id} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                                <td className="p-4 font-semibold text-gray-800 dark:text-gray-100">
-                                                    <div>
-                                                        <div>{student.name}</div>
-                                                        {student.parent_phone && (
-                                                            <div className="text-xs text-gray-500 dark:text-gray-400">ولي الأمر: {student.parent_phone}</div>
-                                                        )}
-                                                    </div>
-                                                </td>
-                                                <td className="p-4 text-gray-600 dark:text-gray-300">{student.email}</td>
-                                                <td className="p-4 text-gray-600 dark:text-gray-300">{student.phone || '-'}</td>
-                                                <td className="p-4 text-gray-600 dark:text-gray-300">{new Date(student.created_at).toLocaleDateString('ar-EG')}</td>
-                                                <td className="p-4">
-                                                    <span className={`px-3 py-1 text-xs font-bold rounded-full ${
-                                                        student.status === 'active' ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' :
-                                                        student.status === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/50 dark:text-yellow-300' :
-                                                        student.status === 'inactive' ? 'bg-gray-100 text-gray-700 dark:bg-gray-900/50 dark:text-gray-300' :
-                                                        'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300'
-                                                    }`}>
-                                                        {
-                                                            student.status === 'active' ? 'نشط' :
-                                                            student.status === 'pending' ? 'معلق' :
-                                                            student.status === 'inactive' ? 'غير نشط' :
-                                                            'محظور'
-                                                        }
-                                                    </span>
-                                                    {student.account_expires_at && (
-                                                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                                            ينتهي: {new Date(student.account_expires_at).toLocaleDateString('ar-EG')}
-                                                        </div>
-                                                    )}
-                                                </td>
-                                                <td className="p-4">
-                                                    <div className="flex gap-2">
-                                                        <button 
-                                                            onClick={() => handleOpenModal(student)} 
-                                                            className="text-gray-400 hover:text-blue-500 transition-colors p-2 rounded-lg hover:bg-blue-50" 
-                                                            aria-label="تعديل"
-                                                            title="تعديل بيانات الطالب"
-                                                        >
-                                                            <PencilIcon className="w-5 h-5"/>
-                                                        </button>
-                                                        <button 
-                                                            onClick={() => handleDeleteStudent(student.id, student.name)} 
-                                                            className="text-gray-400 hover:text-red-500 transition-colors p-2 rounded-lg hover:bg-red-50" 
-                                                            aria-label="حذف"
-                                                            title="حذف الطالب"
-                                                        >
-                                                            <TrashIcon className="w-5 h-5"/>
-                                                        </button>
-                                                    </div>
-                                                </td>
-                                            </tr>
+                                            <StudentRow key={student.id} student={student} onEdit={() => handleOpenModal(student)} onDelete={() => handleDeleteStudent(student.id, student.name)} />
                                         ))
                                     ) : (
                                         <tr>
-                                            <td colSpan={6} className="text-center p-12 text-gray-500 dark:text-gray-400">
+                                            <td colSpan={7} className="text-center p-12 text-gray-500 dark:text-gray-400">
                                                 <div className="flex flex-col items-center gap-4">
                                                     <UserPlusIcon className="h-16 w-16 text-gray-300" />
                                                     <div>

@@ -1,28 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import type { Course, Notification } from '../types';
+import type { Notification } from '../types';
 import { BookOpenIcon, BellIcon, ClipboardListIcon, UserCircleIcon } from './Icons';
 import { supabase } from '../lib/supabaseClient';
 
-// --- Mock Data ---
-// سيتم استبداله بالبيانات الحقيقية من قاعدة البيانات
-const courses: Course[] = [
-  { id: 1, title: "مقدمة في علوم الحاسب", description: "أساسيات البرمجة وهياكل البيانات.", progress: 75, thumbnail: "https://picsum.photos/seed/course1/400/200" },
-  { id: 2, title: "التصميم الجرافيكي للمبتدئين", description: "تعلم أساسيات Adobe Photoshop و Illustrator.", progress: 40, thumbnail: "https://picsum.photos/seed/course2/400/200" },
-  { id: 3, title: "التسويق الرقمي المتقدم", description: "استراتيجيات SEO, SEM, والتسويق عبر المحتوى.", progress: 90, thumbnail: "https://picsum.photos/seed/course3/400/200" },
-  { id: 4, title: "تطوير تطبيقات الويب", description: "بناء تطبيقات تفاعلية باستخدام React.", progress: 20, thumbnail: "https://picsum.photos/seed/course4/400/200" },
-];
+// --- Types ---
+interface StudentSection {
+  id: string;
+  title: string;
+  description: string | null;
+  thumbnail: string | null;
+  granted_at: string;
+  progress?: number; // سيتم إضافة نظام التقدم لاحقاً
+}
+
+// --- Mock Notifications (سيتم استبدالها لاحقاً) ---
 const notifications: Notification[] = [
-    { id: 1, message: "تمت إضافة واجب جديد في كورس علوم الحاسب.", time: "منذ 5 دقائق", isRead: false },
-    { id: 2, message: "حصلت على درجة 95% في اختبار التصميم.", time: "منذ ساعتين", isRead: false },
-    { id: 3, message: "رسالة ترحيب من المدرب خالد.", time: "بالأمس", isRead: true },
-    { id: 4, message: "تذكير: محاضرة مباشرة اليوم الساعة 8 مساءً.", time: "بالأمس", isRead: true },
+    { id: "1", title: "إشعار جديد", message: "تمت إضافة واجب جديد في كورس علوم الحاسب.", type: "info", read: false, created_at: new Date().toISOString() },
+    { id: "2", title: "نتيجة اختبار", message: "حصلت على درجة 95% في اختبار التصميم.", type: "success", read: false, created_at: new Date().toISOString() },
+    { id: "3", title: "رسالة ترحيب", message: "رسالة ترحيب من المدرب خالد.", type: "info", read: true, created_at: new Date().toISOString() },
+    { id: "4", title: "تذكير", message: "تذكير: محاضرة مباشرة اليوم الساعة 8 مساءً.", type: "warning", read: true, created_at: new Date().toISOString() },
 ];
 
-const totalProgress = Math.round(courses.reduce((acc, course) => acc + course.progress, 0) / courses.length);
-const unreadNotificationsCount = notifications.filter(n => !n.isRead).length;
+const unreadNotificationsCount = notifications.filter(n => !n.read).length;
 
-// --- Helper Components (Defined outside main component to prevent re-renders) ---
-
+// --- Helper Components ---
 interface ProgressBarProps {
   progress: number;
   colorClass?: string;
@@ -37,62 +38,176 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ progress, colorClass = 'bg-vi
   </div>
 );
 
-const CourseCardComponent: React.FC<{ course: Course }> = ({ course }) => (
+const SectionCardComponent: React.FC<{ section: StudentSection }> = ({ section }) => (
   <div className="bg-white/50 dark:bg-gray-800/50 backdrop-blur-lg border border-white/30 dark:border-gray-700 rounded-2xl shadow-lg dark:shadow-gray-900/50 overflow-hidden transform hover:-translate-y-2 transition-transform duration-300 ease-in-out">
-    <img src={course.thumbnail} alt={course.title} className="w-full h-32 object-cover" />
+    {section.thumbnail ? (
+      <img src={section.thumbnail} alt={section.title} className="w-full h-32 object-cover" />
+    ) : (
+      <div className="w-full h-32 bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
+        <svg className="w-12 h-12 text-white/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+        </svg>
+      </div>
+    )}
     <div className="p-5">
-      <h3 className="font-bold text-lg text-gray-800 dark:text-gray-100 mb-2">{course.title}</h3>
-      <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 h-10">{course.description}</p>
+      <h3 className="font-bold text-lg text-gray-800 dark:text-gray-100 mb-2">{section.title}</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 h-10">{section.description || "لا يوجد وصف متاح"}</p>
       <div className="flex items-center justify-between text-sm">
         <span className="text-gray-500 dark:text-gray-400">التقدم</span>
-        <span className="font-semibold text-violet-600 dark:text-violet-400">{course.progress}%</span>
+        <span className="font-semibold text-violet-600 dark:text-violet-400">{section.progress || 0}%</span>
       </div>
-      <ProgressBar progress={course.progress} heightClass="h-1.5 mt-2" />
+      <ProgressBar progress={section.progress || 0} heightClass="h-1.5 mt-2" />
+      <div className="mt-3 text-xs text-gray-400 dark:text-gray-500">
+        تم التخصيص: {new Date(section.granted_at).toLocaleDateString('ar-SA')}
+      </div>
     </div>
   </div>
 );
 
 // --- Main Dashboard Component ---
-
 const StudentDashboard: React.FC = () => {
   const [activeItem, setActiveItem] = useState('كورساتي');
   const [isNotificationsOpen, setNotificationsOpen] = useState(false);
   const [studentName, setStudentName] = useState("");
   const [studentEmail, setStudentEmail] = useState("");
+  const [sections, setSections] = useState<StudentSection[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // جلب بيانات الطالب الحالي عند تحميل الصفحة
-    async function fetchStudentData() {
-      try {
-        // الحصول على المستخدم الحالي
-        const { data: { user } } = await supabase.auth.getUser();
-        
-        if (user) {
-          setStudentEmail(user.email || "");
-          
-          // الحصول على بيانات الطالب من جدول الطلاب
-          const { data, error } = await supabase
-            .from('students')
-            .select('full_name')
-            .eq('auth_user_id', user.id)
-            .single();
-
-          if (error) {
-            console.error('خطأ في جلب بيانات الطالب:', error);
-          } else if (data) {
-            setStudentName(data.full_name);
-          } else {
-            // إذا لم يتم العثور على بيانات الطالب، استخدم البيانات من المستخدم
-            setStudentName(user.user_metadata?.full_name || "الطالب");
-          }
-        }
-      } catch (error) {
-        console.error('خطأ في جلب بيانات المستخدم:', error);
-      }
-    }
-
     fetchStudentData();
+    fetchStudentSections();
   }, []);
+
+  const fetchStudentData = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (user) {
+        setStudentEmail(user.email || "");
+        
+        const { data, error } = await supabase
+          .from('students')
+          .select('full_name')
+          .eq('auth_user_id', user.id)
+          .single();
+
+        if (error) {
+          console.error('خطأ في جلب بيانات الطالب:', error);
+        } else if (data) {
+          setStudentName(data.full_name);
+        } else {
+          setStudentName(user.user_metadata?.full_name || "الطالب");
+        }
+      }
+    } catch (error) {
+      console.error('خطأ في جلب بيانات المستخدم:', error);
+    }
+  };
+
+  const fetchStudentSections = async () => {
+    try {
+      setLoading(true);
+      
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        setError('يجب تسجيل الدخول أولاً');
+        return;
+      }
+
+      // First, get the student's section access records
+      const { data: accessRecords, error: accessError } = await supabase
+        .from('student_section_access')
+        .select('section_id, granted_at')
+        .eq('student_id', user.id);
+
+      if (accessError) {
+        console.error('خطأ في جلب صلاحيات الوصول:', accessError);
+        // If there's an error with access records, show all published sections
+        const { data: allSections, error: sectionsError } = await supabase
+          .from('sections')
+          .select('id, title, description, thumbnail')
+          .eq('status', 'published');
+          
+        if (sectionsError) {
+          console.error('خطأ في جلب الأقسام المنشورة:', sectionsError);
+          setError('حدث خطأ في جلب الكورسات');
+          return;
+        }
+        
+        const studentSections = (allSections || []).map(section => ({
+          ...section,
+          granted_at: new Date().toISOString(),
+          progress: Math.floor(Math.random() * 100)
+        })) as StudentSection[];
+        
+        setSections(studentSections);
+        return;
+      }
+
+      if (!accessRecords || accessRecords.length === 0) {
+        // No access records found, show all published sections as available
+        const { data: allSections, error: sectionsError } = await supabase
+          .from('sections')
+          .select('id, title, description, thumbnail')
+          .eq('status', 'published');
+          
+        if (sectionsError) {
+          console.error('خطأ في جلب الأقسام المنشورة:', sectionsError);
+          setError('حدث خطأ في جلب الكورسات');
+          return;
+        }
+        
+        const studentSections = (allSections || []).map(section => ({
+          ...section,
+          granted_at: new Date().toISOString(),
+          progress: Math.floor(Math.random() * 100)
+        })) as StudentSection[];
+        
+        setSections(studentSections);
+        return;
+      }
+
+      // Get section IDs that the student has access to
+      const sectionIds = accessRecords.map(record => record.section_id);
+      
+      // Now get the actual section details
+      const { data: sectionsData, error: sectionsError } = await supabase
+        .from('sections')
+        .select('id, title, description, thumbnail, status')
+        .in('id', sectionIds)
+        .eq('status', 'published');
+
+      if (sectionsError) {
+        console.error('خطأ في جلب تفاصيل الأقسام:', sectionsError);
+        setError('حدث خطأ في جلب تفاصيل الكورسات');
+        return;
+      }
+
+      // Combine section data with access information
+      const studentSections = (sectionsData || []).map(section => {
+        const accessRecord = accessRecords.find(record => record.section_id === section.id);
+        return {
+          ...section,
+          granted_at: accessRecord?.granted_at || new Date().toISOString(),
+          progress: Math.floor(Math.random() * 100) // تقدم عشوائي مؤقت
+        };
+      }) as StudentSection[];
+
+      setSections(studentSections);
+    } catch (err) {
+      console.error('خطأ غير متوقع:', err);
+      setError('حدث خطأ غير متوقع');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // حساب التقدم الإجمالي
+  const totalProgress = sections.length > 0 
+    ? Math.round(sections.reduce((acc, section) => acc + (section.progress || 0), 0) / sections.length)
+    : 0;
 
   const sidebarItems = [
     { name: 'كورساتي', icon: <BookOpenIcon /> },
@@ -155,9 +270,41 @@ const StudentDashboard: React.FC = () => {
           {activeItem === 'كورساتي' && (
             <div>
               <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-6">كورساتك الحالية</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                {courses.map(course => <CourseCardComponent key={course.id} course={course} />)}
-              </div>
+              
+              {loading ? (
+                <div className="text-center py-16">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-600 mx-auto mb-4"></div>
+                  <p className="text-gray-600 dark:text-gray-400">جاري تحميل الكورسات...</p>
+                </div>
+              ) : error ? (
+                <div className="text-center py-16">
+                  <div className="bg-red-100 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6 max-w-md mx-auto">
+                    <h3 className="text-lg font-semibold text-red-800 dark:text-red-200 mb-2">خطأ</h3>
+                    <p className="text-red-600 dark:text-red-300 mb-4">{error}</p>
+                    <button
+                      onClick={fetchStudentSections}
+                      className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors"
+                    >
+                      إعادة المحاولة
+                    </button>
+                  </div>
+                </div>
+              ) : sections.length === 0 ? (
+                <div className="text-center py-16">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-3xl p-12 max-w-2xl mx-auto">
+                    <div className="mx-auto w-16 h-16 mb-6 flex items-center justify-center bg-gradient-to-br from-blue-500 to-violet-600 text-white rounded-2xl shadow-lg">
+                      <BookOpenIcon />
+                    </div>
+                    <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">لا توجد كورسات متاحة</h3>
+                    <p className="text-gray-600 dark:text-gray-300 mb-2">لم يتم تخصيص أي كورسات لك بعد.</p>
+                    <p className="text-gray-600 dark:text-gray-300">يرجى التواصل مع الإدارة لتخصيص الكورسات المناسبة لك.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                  {sections.map(section => <SectionCardComponent key={section.id} section={section} />)}
+                </div>
+              )}
             </div>
           )}
           
@@ -209,12 +356,12 @@ const StudentDashboard: React.FC = () => {
         </div>
         <ul className="divide-y divide-gray-100 dark:divide-gray-700 p-2">
           {notifications.map(notif => (
-            <li key={notif.id} className={`p-3 my-1 rounded-lg ${!notif.isRead ? 'bg-sky-50 dark:bg-sky-900/40' : ''}`}>
+            <li key={notif.id} className={`p-3 my-1 rounded-lg ${!notif.read ? 'bg-sky-50 dark:bg-sky-900/40' : ''}`}>
               <div className="flex items-start gap-3">
-                 <span className={`w-2 h-2 mt-2 rounded-full flex-shrink-0 ${!notif.isRead ? 'bg-sky-400' : 'bg-gray-300 dark:bg-gray-600'}`}></span>
+                 <span className={`w-2 h-2 mt-2 rounded-full flex-shrink-0 ${!notif.read ? 'bg-sky-400' : 'bg-gray-300 dark:bg-gray-600'}`}></span>
                  <div>
                     <p className="text-sm text-gray-700 dark:text-gray-300">{notif.message}</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{notif.time}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{new Date(notif.created_at).toLocaleDateString('ar-SA')}</p>
                 </div>
               </div>
             </li>

@@ -1,23 +1,22 @@
 import React, { useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { supabase, supabaseAdmin } from '../lib/supabaseClient';
 
 interface LoginPageProps {
-  role: 'student' | 'admin';
   onLoginSuccess: () => void;
-  onBack: () => void;
 }
 
-const LoginPage: React.FC<LoginPageProps> = ({ role, onLoginSuccess, onBack }) => {
+const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [role, setRole] = useState<'admin' | 'student'>('admin');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const isAdmin = role === 'admin';
-  const title = isAdmin ? 'تسجيل دخول المدرّس' : 'تسجيل دخول الطالب';
-  const welcomeMessage = isAdmin ? 'أدخل بياناتك لإدارة المنصة.' : 'مرحباً بعودتك! أدخل بياناتك للمتابعة.';
-  const adminCredentials = { email: 'admin@educational-platform.com', password: 'admin123' };
-  const studentCredentials = { email: 'ali@example.com', pass: 'student123' };
+  const adminCredentials = {
+    email: 'admin@educational-platform.com',
+    password: 'admin123'
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +32,17 @@ const LoginPage: React.FC<LoginPageProps> = ({ role, onLoginSuccess, onBack }) =
 
       if (error) {
         console.error('Authentication error:', error);
-        setError('البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+        
+        // Provide more specific error messages
+        if (error.message.includes('Invalid login credentials')) {
+          setError('البريد الإلكتروني أو كلمة المرور غير صحيحة. تأكد من إنشاء الحساب أولاً.');
+        } else if (error.message.includes('Email not confirmed')) {
+          setError('يرجى تأكيد البريد الإلكتروني أولاً.');
+        } else if (error.message.includes('Too many requests')) {
+          setError('تم تجاوز عدد المحاولات المسموح. يرجى المحاولة لاحقاً.');
+        } else {
+          setError(`خطأ في تسجيل الدخول: ${error.message}`);
+        }
       } else {
         // Log user data to debug
         console.log('Login successful, user data:', data.user);
@@ -80,69 +89,193 @@ const LoginPage: React.FC<LoginPageProps> = ({ role, onLoginSuccess, onBack }) =
     setIsLoading(false);
   };
 
-  return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-violet-600 to-sky-400 p-4">
-       <button onClick={onBack} aria-label="العودة" className="absolute top-6 right-6 text-white bg-white/20 rounded-full p-2 hover:bg-white/30 transition-colors z-10">
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-        </svg>
-      </button>
-      <div className="w-full max-w-md animate-fade-in">
-        <form
-          onSubmit={handleLogin}
-          className="bg-white/20 backdrop-blur-xl border border-white/30 rounded-2xl shadow-xl p-8 space-y-6 text-white"
-        >
-          <div className="text-center">
-            <h1 className="text-3xl font-black mb-2">{title}</h1>
-            <p className="text-white/80">{welcomeMessage}</p>
-          </div>
+  // Function to create test users using admin client
+  const createTestUser = async (userType: 'admin' | 'student') => {
+    setIsLoading(true);
+    setError('');
 
+    try {
+      const testCredentials = userType === 'admin' 
+        ? { email: 'admin@educational-platform.com', password: 'admin123' }
+        : { email: 'ali@example.com', password: 'student123' };
+
+      // Use admin client to create user
+      const { data, error } = await supabaseAdmin.auth.admin.createUser({
+        email: testCredentials.email,
+        password: testCredentials.password,
+        email_confirm: true, // Auto-confirm email
+        user_metadata: {
+          role: userType
+        }
+      });
+
+      if (error) {
+        if (error.message.includes('User already registered') || error.message.includes('already been registered')) {
+          setError('هذا المستخدم موجود بالفعل. يمكنك تسجيل الدخول مباشرة.');
+        } else {
+          setError(`خطأ في إنشاء المستخدم: ${error.message}`);
+        }
+      } else {
+        console.log('User created successfully:', data);
+        
+        // Add user to public.users table
+        if (data.user) {
+          const { error: insertError } = await supabaseAdmin
+            .from('users')
+            .insert({
+              id: data.user.id,
+              email: data.user.email,
+              role: userType
+            });
+          
+          if (insertError && !insertError.message.includes('duplicate key')) {
+            console.error('Error adding user to public.users:', insertError);
+          }
+
+          // If admin, add to admin_users table
+          if (userType === 'admin') {
+            const { error: adminError } = await supabaseAdmin
+              .from('admin_users')
+              .insert({
+                user_id: data.user.id,
+                role: 'admin'
+              });
+            
+            if (adminError && !adminError.message.includes('duplicate key')) {
+              console.error('Error adding admin user:', adminError);
+            }
+          }
+        }
+        
+        setError('');
+        alert(`تم إنشاء حساب ${userType === 'admin' ? 'المدرّس' : 'الطالب'} بنجاح! يمكنك الآن تسجيل الدخول.`);
+        
+        // Auto-fill the form with the created credentials
+        setEmail(testCredentials.email);
+        setPassword(testCredentials.password);
+      }
+    } catch (err) {
+      console.error('Error creating test user:', err);
+      setError('حدث خطأ أثناء إنشاء المستخدم.');
+    }
+
+    setIsLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center p-4">
+      <div className="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl p-8 w-full max-w-md border border-white/20">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-white mb-2">منصة التعلم التفاعلية</h1>
+          <p className="text-blue-200">مرحباً بك في رحلة التعلم</p>
+        </div>
+
+        {/* Role Selection */}
+        <div className="mb-6">
+          <div className="flex bg-white/10 rounded-lg p-1">
+            <button
+              type="button"
+              onClick={() => setRole('admin')}
+              className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all ${
+                role === 'admin'
+                  ? 'bg-blue-600 text-white shadow-lg'
+                  : 'text-blue-200 hover:text-white'
+              }`}
+            >
+              مدرّس
+            </button>
+            <button
+              type="button"
+              onClick={() => setRole('student')}
+              className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-all ${
+                role === 'student'
+                  ? 'bg-green-600 text-white shadow-lg'
+                  : 'text-green-200 hover:text-white'
+              }`}
+            >
+              طالب
+            </button>
+          </div>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-6">
           <div>
-            <label htmlFor="email" className="block mb-2 text-sm font-semibold">البريد الإلكتروني</label>
+            <label className="block text-sm font-medium text-blue-200 mb-2">
+              البريد الإلكتروني
+            </label>
             <input
-              id="email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="أدخل بريدك الإلكتروني"
               required
-              className="w-full p-3 bg-white/30 rounded-lg placeholder-white/70 focus:bg-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 transition duration-300"
-              placeholder={isAdmin ? adminCredentials.email : 'student@example.com'}
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="block mb-2 text-sm font-semibold">كلمة المرور</label>
+            <label className="block text-sm font-medium text-blue-200 mb-2">
+              كلمة المرور
+            </label>
             <input
-              id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="أدخل كلمة المرور"
               required
-              className="w-full p-3 bg-white/30 rounded-lg placeholder-white/70 focus:bg-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 transition duration-300"
-              placeholder="••••••••"
             />
           </div>
 
-          {error && <p className="text-center bg-red-500/50 text-white py-2 rounded-lg">{error}</p>}
+          {error && (
+            <div className="bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-3 rounded-lg text-sm">
+              {error}
+            </div>
+          )}
 
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isLoading ? 'جاري تسجيل الدخول...' : 'تسجيل الدخول'}
+          </button>
+        </form>
+
+        {/* Test User Creation Buttons */}
+        <div className="mt-6 space-y-3">
           {isAdmin && (
             <div className="bg-blue-500/30 text-white p-3 rounded-lg text-sm">
               <p className="font-semibold mb-1">بيانات تسجيل الدخول للمدرّس:</p>
               <p>البريد الإلكتروني: {adminCredentials.email}</p>
               <p>كلمة المرور: {adminCredentials.password}</p>
+              <button
+                type="button"
+                onClick={() => createTestUser('admin')}
+                disabled={isLoading}
+                className="mt-2 w-full p-2 bg-blue-600/50 hover:bg-blue-600/70 rounded text-sm transition-colors disabled:opacity-50"
+              >
+                إنشاء حساب المدرّس التجريبي
+              </button>
             </div>
           )}
 
-          <div>
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full p-4 bg-white text-violet-700 font-bold text-lg rounded-lg shadow-lg hover:bg-gray-100 hover:scale-105 transform transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-white/50 disabled:opacity-70 disabled:cursor-not-allowed"
-            >
-              {isLoading ? 'جارِ التحقق...' : 'تسجيل الدخول'}
-            </button>
-          </div>
-        </form>
+          {!isAdmin && (
+            <div className="bg-green-500/30 text-white p-3 rounded-lg text-sm">
+              <p className="font-semibold mb-1">بيانات تسجيل الدخول للطالب:</p>
+              <p>البريد الإلكتروني: ali@example.com</p>
+              <p>كلمة المرور: student123</p>
+              <button
+                type="button"
+                onClick={() => createTestUser('student')}
+                disabled={isLoading}
+                className="mt-2 w-full p-2 bg-green-600/50 hover:bg-green-600/70 rounded text-sm transition-colors disabled:opacity-50"
+              >
+                إنشاء حساب الطالب التجريبي
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
